@@ -14,6 +14,107 @@ class SoundFX {
   constructor() {
     this.ctx = null;
     this.muted = false;
+    this.bgmPlaying = false;
+  }
+  
+  startBGM() {
+    if (this.bgmPlaying) return;
+    this.bgmPlaying = true;
+    this._playNextFluteNote();
+  }
+
+  stopBGM() {
+    this.bgmPlaying = false;
+  }
+
+  _playNextFluteNote() {
+    // If not playing, or muted, don't schedule WebAudio, but keep the loop alive so it can resume when unmuted
+    if (!this.bgmPlaying) return;
+    if (this.muted) {
+      setTimeout(() => this._playNextFluteNote(), 1000);
+      return;
+    }
+    this.init();
+    if (!this.ctx) return;
+    
+    // Japanese Shakuhachi / Hirajōshi-inspired scale
+    const freqs = [349.23, 369.99, 466.16, 523.25, 554.37, 698.46, 739.99];
+    // Favor lower notes slightly
+    const idx = Math.floor(Math.pow(Math.random(), 1.5) * freqs.length);
+    const freq = freqs[idx];
+    
+    // Sometimes play a grace note (quick slide up)
+    const isGrace = Math.random() > 0.7;
+    
+    const duration = 1.5 + Math.random() * 2.5;
+    const t = this.ctx.currentTime;
+    
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sine';
+    
+    if (isGrace && idx > 0) {
+      osc.frequency.setValueAtTime(freqs[idx-1], t);
+      osc.frequency.exponentialRampToValueAtTime(freq, t + 0.15);
+    } else {
+      osc.frequency.setValueAtTime(freq, t);
+    }
+    
+    const lfo = this.ctx.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.value = 4 + Math.random() * 2; 
+    const lfoGain = this.ctx.createGain();
+    lfoGain.gain.value = freq * 0.012; 
+    lfo.connect(lfoGain);
+    lfoGain.connect(osc.frequency);
+    
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.08, t + 0.6); 
+    gain.gain.setValueAtTime(0.08, t + duration - 0.8); 
+    gain.gain.linearRampToValueAtTime(0, t + duration); 
+    
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 900;
+    
+    // Add some noise for "breath"
+    const bufferSize = this.ctx.sampleRate * duration;
+    const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const output = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      output[i] = Math.random() * 2 - 1;
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = noiseBuffer;
+    
+    const noiseFilter = this.ctx.createBiquadFilter();
+    noiseFilter.type = 'bandpass';
+    noiseFilter.frequency.value = freq;
+    noiseFilter.Q.value = 3;
+    
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0, t);
+    noiseGain.gain.linearRampToValueAtTime(0.015, t + 0.6);
+    noiseGain.gain.setValueAtTime(0.015, t + duration - 0.8);
+    noiseGain.gain.linearRampToValueAtTime(0, t + duration);
+    
+    noise.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    noiseGain.connect(this.ctx.destination);
+    
+    osc.connect(gain);
+    gain.connect(filter);
+    filter.connect(this.ctx.destination);
+    
+    osc.start(t);
+    lfo.start(t);
+    noise.start(t);
+    osc.stop(t + duration);
+    lfo.stop(t + duration);
+    
+    const rest = Math.random() > 0.6 ? 500 : 1500 + Math.random() * 2000;
+    const nextDelay = duration * 1000 + rest;
+    setTimeout(() => this._playNextFluteNote(), nextDelay);
   }
   init() {
     if (this.muted) return;
