@@ -287,6 +287,19 @@ export class NinjaRunner3D {
     this._lastFrameTime = performance.now();
     this._fpsFrameCount = 0;
     this._fpsTimeAcc = 0;
+    this.worldPivot = new THREE.Group();
+    this.scene.add(this.worldPivot);
+    this.worldGroup = new THREE.Group();
+    this.worldPivot.add(this.worldGroup);
+    
+    // For 90 degree corners
+    this.trackCursor = new THREE.Vector3(0, 0, 0);
+    this.trackDir = new THREE.Vector3(0, 0, -1);
+    this.corners = [];
+    this.targetWorldRot = 0;
+    this.currentWorldRot = 0;
+    this.isTurning = false;
+    this.turnDirection = 0; // -1 left, 1 right
 
     this._initThree();
     this._initMaterials();
@@ -350,15 +363,32 @@ export class NinjaRunner3D {
 
   // ── Shared Materials ────────────────────────────────────────────
   _initMaterials() {
+    const tl = new THREE.TextureLoader();
+    const streetTex = tl.load('/assets/map/sakura_street.jpg');
+    streetTex.wrapS = THREE.RepeatWrapping;
+    streetTex.wrapT = THREE.RepeatWrapping;
+    streetTex.repeat.set(1, 4);
+
+    const fujiDayTex = tl.load('/assets/map/fuji_day.jpg');
+    const fujiNightTex = tl.load('/assets/map/fuji_night.jpg');
+    const sakuraPropsTex = tl.load('/assets/map/sakura_props.png');
+    const mountainConeTex = tl.load('/assets/map/mountain_cone.jpg');
+    
+    // We can save textures to use later
+    this.fujiDayTex = fujiDayTex;
+    this.fujiNightTex = fujiNightTex;
+
     this.matFloor = new THREE.MeshStandardMaterial({
-      color: 0x1c1a24,
+      map: streetTex,
       roughness: 0.85,
-      metalness: 0.15
+      metalness: 0.15,
+      color: 0x999999
     });
     this.matCeil = new THREE.MeshStandardMaterial({
-      color: 0x141220,
+      map: streetTex,
       roughness: 0.90,
-      metalness: 0.10
+      metalness: 0.10,
+      color: 0x555555
     });
     this.matRedWood = new THREE.MeshStandardMaterial({
       color: 0xb91c1c, // Vermilion lacquer
@@ -395,10 +425,11 @@ export class NinjaRunner3D {
       emissiveIntensity: 0.4
     });
     this.matSakuraLeaves = new THREE.MeshStandardMaterial({
-      color: 0xf472b6,
+      map: sakuraPropsTex,
+      transparent: true,
+      alphaTest: 0.5,
       roughness: 0.65,
-      emissive: 0x831843,
-      emissiveIntensity: 0.18
+      side: THREE.DoubleSide
     });
     this.matScrollParchment = new THREE.MeshStandardMaterial({
       color: 0xfef08a,
@@ -406,6 +437,9 @@ export class NinjaRunner3D {
       emissive: 0xd97706,
       emissiveIntensity: 0.45
     });
+    
+    // Save mountain cone tex for later
+    this.mountainConeTex = mountainConeTex;
   }
 
   // ── Japanese Night Atmosphere (Moon, Fuji, Stars, Lights) ───────
@@ -455,7 +489,7 @@ export class NinjaRunner3D {
     // 4. Distant 3D Mount Fuji (Majestic on the horizon, well clear of the bridge track)
     this.fujiMesh = this._createMountFuji();
     this.fujiMesh.position.set(-170, -10, -420);
-    this.scene.add(this.fujiMesh);
+    this.worldGroup.add(this.fujiMesh);
 
     // 5. Twinkling Starfield
     const starCount = 900;
@@ -469,7 +503,7 @@ export class NinjaRunner3D {
     starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
     const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 1.6, transparent: true, opacity: 0.85 });
     this.stars = new THREE.Points(starGeo, starMat);
-    this.scene.add(this.stars);
+    this.worldGroup.add(this.stars);
 
     // 6. Sun (visible only during Day)
     this.sunGroup = new THREE.Group();
@@ -544,7 +578,7 @@ export class NinjaRunner3D {
 
     this.skyDome = new THREE.Mesh(skyGeo, this.skyMat);
     this.skyDome.renderOrder = -1;
-    this.scene.add(this.skyDome);
+    this.worldGroup.add(this.skyDome);
   }
 
   // ── Procedural 3D Mount Fuji Mesh ───────────────────────────────
@@ -553,12 +587,14 @@ export class NinjaRunner3D {
 
     // Mountain Cone Base
     const coneGeo = new THREE.ConeGeometry(95, 110, 24, 1, true);
-    const coneMat = new THREE.MeshStandardMaterial({
-      color: 0x1e1b4b,
+    
+    // Use the loaded texture!
+    this.fujiMat = new THREE.MeshStandardMaterial({
+      map: this.mountainConeTex,
       roughness: 0.95,
       metalness: 0.05
     });
-    const cone = new THREE.Mesh(coneGeo, coneMat);
+    const cone = new THREE.Mesh(coneGeo, this.fujiMat);
     cone.position.y = 55;
     fujiGroup.add(cone);
 
@@ -665,13 +701,28 @@ export class NinjaRunner3D {
       const z = -i * CHUNK_LEN;
       const chunk = this._createChunk(z, i === 0);
       this.chunks.push(chunk);
-      this.scene.add(chunk.group);
+      this.worldGroup.add(chunk.group);
     }
   }
 
-  _createChunk(zPos, isFirst) {
+  _createChunk(isFirst) {
     const group = new THREE.Group();
-    group.position.z = zPos;
+    group.position.copy(this.trackCursor);
+    
+    let isCorner = false;
+    let turnDir = 0;
+    
+    if (this.trackDir.x === -1) group.rotation.y = Math.PI / 2;
+    else if (this.trackDir.x === 1) group.rotation.y = -Math.PI / 2;
+    else if (this.trackDir.z === 1) group.rotation.y = Math.PI;
+    
+    // Create corners occasionally
+    if (!isFirst && Math.random() > 0.85 && this.chunks && this.chunks.length > 5) {
+      isCorner = true;
+      turnDir = Math.random() > 0.5 ? 1 : -1;
+    }
+    
+    const chunkData = { group, isCorner, turnDir, centerPos: this.trackCursor.clone() };
 
     // 1. Floor Bridge Deck (Width 8.0, Length 40.0)
     const floorGeo = new THREE.BoxGeometry(8.2, 0.6, CHUNK_LEN);
@@ -753,7 +804,37 @@ export class NinjaRunner3D {
       this._populateChunk(group, zPos);
     }
 
-    return { group, zPos };
+    
+    if (isCorner) {
+      // Add a visual indicator (like a big arrow or special floor)
+      const arrowGeo = new THREE.PlaneGeometry(8, 8);
+      const arrowMat = new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.5 });
+      const arrow = new THREE.Mesh(arrowGeo, arrowMat);
+      arrow.rotation.x = -Math.PI/2;
+      arrow.position.y = 0.05;
+      group.add(arrow);
+      
+      this.corners.push(chunkData);
+      
+      this.trackCursor.add(this.trackDir.clone().multiplyScalar(CHUNK_LEN/2));
+      
+      if (turnDir === 1) { // right
+        if (this.trackDir.z === -1) this.trackDir.set(1, 0, 0);
+        else if (this.trackDir.x === 1) this.trackDir.set(0, 0, 1);
+        else if (this.trackDir.z === 1) this.trackDir.set(-1, 0, 0);
+        else if (this.trackDir.x === -1) this.trackDir.set(0, 0, -1);
+      } else { // left
+        if (this.trackDir.z === -1) this.trackDir.set(-1, 0, 0);
+        else if (this.trackDir.x === -1) this.trackDir.set(0, 0, 1);
+        else if (this.trackDir.z === 1) this.trackDir.set(1, 0, 0);
+        else if (this.trackDir.x === 1) this.trackDir.set(0, 0, -1);
+      }
+      this.trackCursor.add(this.trackDir.clone().multiplyScalar(CHUNK_LEN/2));
+    } else {
+      this.trackCursor.add(this.trackDir.clone().multiplyScalar(CHUNK_LEN));
+    }
+    
+    return chunkData;
   }
 
   // ── 3D Asset Builders ───────────────────────────────────────────
@@ -1017,7 +1098,7 @@ export class NinjaRunner3D {
         rx: (Math.random() - 0.5) * 3,
         ry: (Math.random() - 0.5) * 3
       };
-      this.scene.add(mesh);
+      this.worldGroup.add(mesh);
       this.petals.push(mesh);
     }
   }
@@ -1064,6 +1145,45 @@ export class NinjaRunner3D {
   }
 
   _switchLane(dir) {
+    // Check if we are near a corner
+    if (this.corners && this.corners.length > 0) {
+      const nextCorner = this.corners[0];
+      // Convert playerZ to worldGroup local space? 
+      // Actually, since player is at Z, and pivot is at the corner.
+      // We can just check the distance to the corner.
+      const dist = Math.abs(this.playerZ - nextCorner.centerPos.z);
+      
+      if (dist < 15) { // 15 units tolerance for swipe
+        if (dir === nextCorner.turnDir) {
+          // Success turn!
+          this.corners.shift();
+          
+          // Set Pivot to corner center!
+          this.worldGroup.updateMatrixWorld();
+          this.worldPivot.position.copy(nextCorner.centerPos);
+          this.worldPivot.updateMatrixWorld();
+          
+          // Keep worldGroup at same global position
+          const inv = this.worldPivot.matrixWorld.clone().invert();
+          this.worldGroup.matrix.copy(inv).multiply(this.worldGroup.matrixWorld);
+          this.worldGroup.matrix.decompose(this.worldGroup.position, this.worldGroup.quaternion, this.worldGroup.scale);
+          
+          this.targetWorldRot += (dir === 1 ? -Math.PI / 2 : Math.PI / 2);
+          this.isTurning = true;
+          
+          // Ninja spin animation
+          this.ninja.rotation.y = dir === 1 ? -Math.PI*2 : Math.PI*2;
+          
+          this.sfx.playLane(); // Turn sound
+          return;
+        } else {
+          // Swiped wrong way, crash!
+          this._onHitObstacle();
+          return;
+        }
+      }
+    }
+  
     const next = this.currentLane + dir;
     if (next >= 0 && next <= 2) {
       this.currentLane = next;
@@ -1630,7 +1750,21 @@ export class NinjaRunner3D {
     }
 
     // 1. Advance distance and speed
-    this.speed = Math.min(BASE_SPEED + (this.distance / 120), MAX_SPEED);
+    if (this.isTurning) {
+      this.speed = Math.min(BASE_SPEED + (this.distance / 120), MAX_SPEED) * 0.5; // slow down during turn
+      
+      const turnDiff = this.targetWorldRot - this.currentWorldRot;
+      const step = turnDiff * 15.0 * dt;
+      if (Math.abs(turnDiff) < 0.01) {
+        this.currentWorldRot = this.targetWorldRot;
+        this.isTurning = false;
+      } else {
+        this.currentWorldRot += step;
+      }
+      this.worldPivot.rotation.y = this.currentWorldRot;
+    } else {
+      this.speed = Math.min(BASE_SPEED + (this.distance / 120), MAX_SPEED);
+    }
     this.playerZ -= this.speed * dt;
     this.distance = Math.floor(Math.abs(this.playerZ));
     this.score = this.distance * 2 + this.scrolls * 100;
@@ -1833,7 +1967,9 @@ export class NinjaRunner3D {
   _recycleChunks() {
     this.chunks.forEach(chunk => {
       // If chunk is far behind the camera, move it to the front
-      if (chunk.group.position.z > this.playerZ + CHUNK_LEN) {
+      const globalPos = new THREE.Vector3();
+      chunk.group.getWorldPosition(globalPos);
+      if (globalPos.z > this.playerZ + CHUNK_LEN) {
         // Find frontmost chunk
         let minZ = 0;
         this.chunks.forEach(c => { if (c.group.position.z < minZ) minZ = c.group.position.z; });
@@ -1916,7 +2052,9 @@ export class NinjaRunner3D {
     // 1. Obstacles
     for (let i = this.obstacles.length - 1; i >= 0; i--) {
       const obs = this.obstacles[i];
-      if (obs.globalZ > cullZ) {
+      const globalPos = new THREE.Vector3();
+      obs.mesh.getWorldPosition(globalPos);
+      if (globalPos.z > cullZ) {
         this.obstacles.splice(i, 1);
         continue;
       }
@@ -1928,9 +2066,11 @@ export class NinjaRunner3D {
 
       // Collision Check with Player (skip if invincible)
       if (!this.invincible) {
-        const dz = Math.abs(this.playerZ - obs.globalZ);
-        const dx = Math.abs(this.playerX - obs.laneX);
-        const dy = Math.abs(this.playerY - obs.y);
+        const globalPos = new THREE.Vector3();
+        obs.mesh.getWorldPosition(globalPos);
+        const dz = Math.abs(this.playerZ - globalPos.z);
+        const dx = Math.abs(this.playerX - globalPos.x);
+        const dy = Math.abs(this.playerY - globalPos.y);
 
         if (dz < 1.1 && dx < 0.95 && dy < 1.1) {
           this._onHitObstacle();
@@ -1942,7 +2082,9 @@ export class NinjaRunner3D {
     // 2. Collectibles
     for (let i = this.collectibles.length - 1; i >= 0; i--) {
       const col = this.collectibles[i];
-      if (col.globalZ > cullZ) {
+      const globalPos = new THREE.Vector3();
+      col.mesh.getWorldPosition(globalPos);
+      if (globalPos.z > cullZ) {
         this.collectibles.splice(i, 1);
         continue;
       }
@@ -1953,9 +2095,11 @@ export class NinjaRunner3D {
         col.mesh.position.y = col.y + Math.sin(this.clock.getElapsedTime() * 4) * 0.15;
 
         // Pickup check
-        const dz = Math.abs(this.playerZ - col.globalZ);
-        const dx = Math.abs(this.playerX - col.laneX);
-        const dy = Math.abs(this.playerY - col.y);
+        const globalPos = new THREE.Vector3();
+        col.mesh.getWorldPosition(globalPos);
+        const dz = Math.abs(this.playerZ - globalPos.z);
+        const dx = Math.abs(this.playerX - globalPos.x);
+        const dy = Math.abs(this.playerY - globalPos.y);
 
         if (dz < 1.4 && dx < 1.0 && dy < 1.4) {
           col.collected = true;
@@ -1980,8 +2124,10 @@ export class NinjaRunner3D {
     // 3. Super Scroll Pickups (spin fast, glow gold)
     for (let i = this.superScrollPickups.length - 1; i >= 0; i--) {
       const sp = this.superScrollPickups[i];
-      if (sp.globalZ > cullZ) {
-        this.scene.remove(sp.mesh);
+      const globalPos = new THREE.Vector3();
+      sp.mesh.getWorldPosition(globalPos);
+      if (globalPos.z > cullZ) {
+        this.worldGroup.remove(sp.mesh);
         this.superScrollPickups.splice(i, 1);
         continue;
       }
@@ -1991,9 +2137,11 @@ export class NinjaRunner3D {
         sp.mesh.rotation.z = Math.sin(this.clock.getElapsedTime() * 5) * 0.18;
         sp.mesh.position.y = sp.y + Math.sin(this.clock.getElapsedTime() * 3) * 0.28;
 
-        const dz = Math.abs(this.playerZ - sp.globalZ);
-        const dx = Math.abs(this.playerX - sp.laneX);
-        const dy = Math.abs(this.playerY - sp.y);
+        const globalPos = new THREE.Vector3();
+        sp.mesh.getWorldPosition(globalPos);
+        const dz = Math.abs(this.playerZ - globalPos.z);
+        const dx = Math.abs(this.playerX - globalPos.x);
+        const dy = Math.abs(this.playerY - globalPos.y);
 
         if (dz < 1.6 && dx < 1.2 && dy < 1.6) {
           sp.collected = true;
@@ -2007,8 +2155,10 @@ export class NinjaRunner3D {
     // 4. Bonus Life Pickups
     for (let i = this.lifePickups.length - 1; i >= 0; i--) {
       const lp = this.lifePickups[i];
-      if (lp.globalZ > cullZ) {
-        this.scene.remove(lp.mesh);
+      const globalPos = new THREE.Vector3();
+      lp.mesh.getWorldPosition(globalPos);
+      if (globalPos.z > cullZ) {
+        this.worldGroup.remove(lp.mesh);
         this.lifePickups.splice(i, 1);
         continue;
       }
@@ -2019,9 +2169,11 @@ export class NinjaRunner3D {
         lp.mesh.position.y = lp.y + Math.sin(this.clock.getElapsedTime() * 3.5) * 0.22;
 
         // Pickup check
-        const dz = Math.abs(this.playerZ - lp.globalZ);
-        const dx = Math.abs(this.playerX - lp.laneX);
-        const dy = Math.abs(this.playerY - lp.y);
+        const globalPos = new THREE.Vector3();
+        lp.mesh.getWorldPosition(globalPos);
+        const dz = Math.abs(this.playerZ - globalPos.z);
+        const dx = Math.abs(this.playerX - globalPos.x);
+        const dy = Math.abs(this.playerY - globalPos.y);
 
         if (dz < 1.4 && dx < 1.0 && dy < 1.4) {
           lp.collected = true;
@@ -2060,7 +2212,7 @@ export class NinjaRunner3D {
 
     const mesh = this._createSuperScroll();
     mesh.position.set(laneX, y, globalZ);
-    this.scene.add(mesh);
+    this.worldGroup.add(mesh);
 
     this.superScrollPickups.push({ mesh, globalZ, laneX, y, collected: false });
     this._showPopup('✨ SUPER SCROLL AHEAD!', '#ffd700');
@@ -2287,7 +2439,7 @@ export class NinjaRunner3D {
 
     const mesh = this._createLifePickup();
     mesh.position.set(laneX, y, globalZ);
-    this.scene.add(mesh);
+    this.worldGroup.add(mesh);
 
     this.lifePickups.push({ mesh, globalZ, laneX, y, collected: false });
 
