@@ -16,69 +16,23 @@ class SoundFX {
     this.muted = false;
     this.musicMuted = false;
     this.bgmPlaying = false;
+    
+    this.bgmAudio = new Audio('/assets/sounds/bg_music.mp3');
+    this.bgmAudio.loop = true;
+    this.bgmAudio.volume = 0.5;
   }
   
   startBGM() {
     if (this.bgmPlaying) return;
     this.bgmPlaying = true;
-    this._playNextFluteNote();
+    if (!this.musicMuted) {
+      this.bgmAudio.play().catch(e => console.warn('BGM play blocked', e));
+    }
   }
 
   stopBGM() {
     this.bgmPlaying = false;
-  }
-
-  _playNextFluteNote() {
-    if (!this.bgmPlaying) return;
-    if (this.muted || this.musicMuted) {
-      setTimeout(() => this._playNextFluteNote(), 1000);
-      return;
-    }
-    this.init();
-    if (!this.ctx) return;
-    
-    // Soft relaxing pentatonic scale (A minor pentatonic: A, C, D, E, G)
-    // Lower octaves for warmth (A3 to E5)
-    const freqs = [220.00, 261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25];
-    const freq = freqs[Math.floor(Math.random() * freqs.length)];
-    
-    const duration = 4.0 + Math.random() * 4.0; // Long, slow, meditative notes
-    const t = this.ctx.currentTime;
-    
-    const osc = this.ctx.createOscillator();
-    osc.type = 'triangle'; // Warmer and softer than sine/saw
-    osc.frequency.setValueAtTime(freq, t);
-    
-    const lfo = this.ctx.createOscillator();
-    lfo.type = 'sine';
-    lfo.frequency.value = 2.5; // Very slow vibrato
-    const lfoGain = this.ctx.createGain();
-    lfoGain.gain.value = freq * 0.008; 
-    lfo.connect(lfoGain);
-    lfoGain.connect(osc.frequency);
-    
-    const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0, t);
-    gain.gain.linearRampToValueAtTime(0.04, t + 2.0); // Very slow attack, low volume
-    gain.gain.setValueAtTime(0.04, t + duration - 2.0); // Sustain
-    gain.gain.linearRampToValueAtTime(0, t + duration); // Very slow release
-    
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = 500 + Math.random() * 300; // Roll off high frequencies
-    
-    osc.connect(gain);
-    gain.connect(filter);
-    filter.connect(this.ctx.destination);
-    
-    osc.start(t);
-    lfo.start(t);
-    osc.stop(t + duration);
-    lfo.stop(t + duration);
-    
-    // Schedule next note with a beautiful overlapping delay
-    const nextDelay = (duration * 0.6) * 1000 + Math.random() * 1000;
-    setTimeout(() => this._playNextFluteNote(), nextDelay);
+    this.bgmAudio.pause();
   }
   init() {
     if (this.muted) return;
@@ -1650,6 +1604,12 @@ export class NinjaRunner3D {
     };
     this.btnMusic.onclick = () => {
       this.gameSettings.music = !this.gameSettings.music;
+      this.sfx.musicMuted = !this.gameSettings.music;
+      if (this.sfx.musicMuted) {
+        this.sfx.bgmAudio.pause();
+      } else if (this.sfx.bgmPlaying) {
+        this.sfx.bgmAudio.play().catch(e => console.warn(e));
+      }
       this._updateSettingsUI();
     };
     this.btnVib.onclick = () => {
