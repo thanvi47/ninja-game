@@ -14,6 +14,7 @@ class SoundFX {
   constructor() {
     this.ctx = null;
     this.muted = false;
+    this.musicMuted = false;
     this.bgmPlaying = false;
   }
   
@@ -29,7 +30,7 @@ class SoundFX {
 
   _playNextFluteNote() {
     if (!this.bgmPlaying) return;
-    if (this.muted) {
+    if (this.muted || this.musicMuted) {
       setTimeout(() => this._playNextFluteNote(), 1000);
       return;
     }
@@ -339,7 +340,7 @@ export class NinjaRunner3D {
     this.dailyStreak = savedStreak;
 
     // Load Game Settings
-    const defaultSettings = { name: "Ninja", sound: true, graphics: "high", vibration: "med", fps: 120 };
+    const defaultSettings = { name: "Ninja", sound: true, music: true, graphics: "high", vibration: "med", fps: 120 };
     const savedSettings = JSON.parse(localStorage.getItem('hattori_3d_settings') || '{}');
     this.gameSettings = Object.assign({}, defaultSettings, savedSettings);
     if (![60, 90, 120, 'MAX'].includes(this.gameSettings.fps)) {
@@ -347,6 +348,7 @@ export class NinjaRunner3D {
     }
     this.targetFPS = this.gameSettings.fps;
     this.sfx.muted = !this.gameSettings.sound;
+    this.sfx.musicMuted = !this.gameSettings.music;
     this.playerName = this.gameSettings.name;
     this._lastFrameTime = performance.now();
     this._fpsFrameCount = 0;
@@ -1565,6 +1567,10 @@ export class NinjaRunner3D {
             <span>SOUND</span>
             <button id="btn-toggle-sound" class="modal-btn-ghost" style="margin-top:0; padding:6px 16px; font-size:12px;">ON</button>
           </div>
+          <div class="settings-row">
+            <span>MUSIC</span>
+            <button id="btn-toggle-music" class="modal-btn-ghost" style="margin-top:0; padding:6px 16px; font-size:12px;">ON</button>
+          </div>
           
           <div class="settings-row">
             <span>VIBRATION</span>
@@ -1624,6 +1630,7 @@ export class NinjaRunner3D {
     document.getElementById('btn-close-settings').onclick = () => this._closeSettings();
 
     this.btnSound = document.getElementById('btn-toggle-sound');
+    this.btnMusic = document.getElementById('btn-toggle-music');
     this.btnVib = document.getElementById('btn-toggle-vib');
     this.btnGfx = document.getElementById('btn-toggle-gfx');
     this.btnFps = document.getElementById('btn-toggle-fps');
@@ -1639,6 +1646,10 @@ export class NinjaRunner3D {
 
     this.btnSound.onclick = () => {
       this.gameSettings.sound = !this.gameSettings.sound;
+      this._updateSettingsUI();
+    };
+    this.btnMusic.onclick = () => {
+      this.gameSettings.music = !this.gameSettings.music;
       this._updateSettingsUI();
     };
     this.btnVib.onclick = () => {
@@ -1708,6 +1719,10 @@ export class NinjaRunner3D {
     this.btnSound.innerText = this.gameSettings.sound ? 'ON' : 'OFF';
     this.btnSound.style.color = this.gameSettings.sound ? '#fef08a' : '#94a3b8';
     this.btnSound.style.borderColor = this.gameSettings.sound ? '#f59e0b' : '#334155';
+
+    this.btnMusic.innerText = this.gameSettings.music ? 'ON' : 'OFF';
+    this.btnMusic.style.color = this.gameSettings.music ? '#fef08a' : '#94a3b8';
+    this.btnMusic.style.borderColor = this.gameSettings.music ? '#f59e0b' : '#334155';
 
     let vibState = this.gameSettings.vibration;
     if (vibState === true) vibState = 'high';
