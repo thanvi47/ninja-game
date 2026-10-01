@@ -35,6 +35,7 @@ class SoundFX {
       return;
     }
     this.init();
+    console.log("Playing flute note");
     if (!this.ctx) return;
     
     // Japanese Shakuhachi / Hirajōshi-inspired scale
@@ -69,8 +70,8 @@ class SoundFX {
     
     const gain = this.ctx.createGain();
     gain.gain.setValueAtTime(0, t);
-    gain.gain.linearRampToValueAtTime(0.08, t + 0.6); 
-    gain.gain.setValueAtTime(0.08, t + duration - 0.8); 
+    gain.gain.linearRampToValueAtTime(0.3, t + 0.6); 
+    gain.gain.setValueAtTime(0.3, t + duration - 0.8); 
     gain.gain.linearRampToValueAtTime(0, t + duration); 
     
     const filter = this.ctx.createBiquadFilter();
@@ -78,7 +79,7 @@ class SoundFX {
     filter.frequency.value = 900;
     
     // Add some noise for "breath"
-    const bufferSize = this.ctx.sampleRate * duration;
+    const bufferSize = Math.floor(this.ctx.sampleRate * duration);
     const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
     const output = noiseBuffer.getChannelData(0);
     for (let i = 0; i < bufferSize; i++) {
@@ -1209,6 +1210,14 @@ export class NinjaRunner3D {
 
   // ── User Input & Controls ───────────────────────────────────────
   _initControls() {
+    const startAudio = () => {
+      this.sfx.startBGM();
+      window.removeEventListener('pointerdown', startAudio);
+      window.removeEventListener('keydown', startAudio);
+    };
+    window.addEventListener('pointerdown', startAudio);
+    window.addEventListener('keydown', startAudio);
+
     window.addEventListener('keydown', (e) => {
       if (this.gameOver) {
         if (e.code === 'Space') this.restart();
