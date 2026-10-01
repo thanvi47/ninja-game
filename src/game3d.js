@@ -287,10 +287,7 @@ export class NinjaRunner3D {
     this._lastFrameTime = performance.now();
     this._fpsFrameCount = 0;
     this._fpsTimeAcc = 0;
-    this.worldPivot = new THREE.Group();
-    this.scene.add(this.worldPivot);
-    this.worldGroup = new THREE.Group();
-    this.worldPivot.add(this.worldGroup);
+    
     
     // For 90 degree corners
     this.trackCursor = new THREE.Vector3(0, 0, 0);
@@ -302,6 +299,10 @@ export class NinjaRunner3D {
     this.turnDirection = 0; // -1 left, 1 right
 
     this._initThree();
+    this.worldPivot = new THREE.Group();
+    this.scene.add(this.worldPivot);
+    this.worldGroup = new THREE.Group();
+    this.worldPivot.add(this.worldGroup);
     this._initMaterials();
     this._createAtmosphere();
     this._createCharacter();
@@ -696,10 +697,12 @@ export class NinjaRunner3D {
     this.chunks = [];
     this.obstacles = [];
     this.collectibles = [];
+    this.trackCursor.set(0, 0, 0);
+    this.trackDir.set(0, 0, -1);
 
     for (let i = 0; i < CHUNK_COUNT; i++) {
-      const z = -i * CHUNK_LEN;
-      const chunk = this._createChunk(z, i === 0);
+      const isFirst = (i === 0);
+      const chunk = this._createChunk(isFirst);
       this.chunks.push(chunk);
       this.worldGroup.add(chunk.group);
     }
@@ -782,7 +785,7 @@ export class NinjaRunner3D {
     }
 
     // 3. Side Scenery: Torii Gate or Pagoda or Sakura Trees
-    const seed = Math.abs(Math.sin(zPos * 0.13));
+    const seed = Math.abs(Math.sin(this.trackCursor.z * 0.13));
     if (seed > 0.45 && !isFirst) {
       // Grand Torii Gate spanning across the 3 lanes
       const torii = this._createToriiGate();
@@ -800,8 +803,8 @@ export class NinjaRunner3D {
     }
 
     // 4. Spawn Obstacles and Collectibles (Skip starting safe chunk)
-    if (!isFirst) {
-      this._populateChunk(group, zPos);
+    if (!isFirst && !isCorner) {
+      this._populateChunk(group, chunkData.centerPos);
     }
 
     
@@ -959,7 +962,7 @@ export class NinjaRunner3D {
   }
 
   // ── Spawn Obstacles & Scrolls in Chunks ──────────────────────────
-  _populateChunk(group, zPos) {
+  _populateChunk(group, centerPos) {
     const obstacleCount = 2;
     for (let i = 0; i < obstacleCount; i++) {
       const laneIdx = Math.floor(Math.random() * 3);
@@ -984,7 +987,7 @@ export class NinjaRunner3D {
       this.obstacles.push({
         mesh,
         type,
-        globalZ: zPos + zOffset,
+        globalZ: 0,
         laneX,
         y: obsY,
         radius: 0.85
@@ -1001,7 +1004,7 @@ export class NinjaRunner3D {
 
     this.collectibles.push({
       mesh: scroll,
-      globalZ: zPos + scrollZ,
+      globalZ: 0,
       laneX: LANES[openLane],
       y: scrollY,
       collected: false
